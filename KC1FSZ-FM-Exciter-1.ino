@@ -63,34 +63,34 @@ void initializeADF4001() {
   // to 0.
   latch = 0;
   // PD1: Power Down 2
-  a = 0x0;
+  a = 0x0; [Normal operation]
   latch |= (a << 21);
   // CPI6/CPI5/CPI4: Current Setting 2
-  a = 0x3;
+  a = 0x3; [2.5mA using 4.7k reistor]
   latch |= (a << 18);
   // CPI3/CPI2/CPI1: Current Setting 1
-  a = 0x3;
+  a = 0x3; [2.5mA using 4.7k reistor]
   latch |= (a << 15);
   // TC4/TC3/TC2/TC1: Timer Counter Control
-  a = 0x0;
+  a = 0x0; [3 cycles]
   latch |= (a << 11);
   // F5/F4: Fast Lock Mode and Fast Lock Mode Enable
-  a = 0x0;
+  a = 0x0; [Disabled]
   latch |= (a << 9);
   // F3: CP Three State
-  a = 0x0;
+  a = 0x0; [Normal]
   latch |= (a << 8);
   // F2: Phase detector polarity
-  a = 0x1;
+  a = 0x1; [Positive]
   latch |= (a << 7);
   // M3/M2/M1: MUXOUT Control
-  a = 0x1;
+  a = 0x1; [Digital lock detect]
   latch |= (a << 4);
   // PD1: Power Down 1
-  a = 0x0;
+  a = 0x0; [Normal]
   latch |= (a << 3);
   // F1: Counter Reset
-  a = 0x0;
+  a = 0x0; [Normal]
   latch |= (a << 2);
   // C2/C1: Control Bits
   a = 0x3;
@@ -100,13 +100,10 @@ void initializeADF4001() {
   // 2. Do an R load
   latch = 0;
   // LDP: Lock Detect Precision
-  a = 0x1;
+  a = 0x1; [5 consecutive cycles needed]
   latch |= (a << 20);
-  // T2/T1: Test Mode
-  a = 0x0;
-  latch |= (a << 18);
   // ABP2/ABP1: Anti-Backlash Width
-  a = 0x0;
+  a = 0x0; [2.9ns]
   latch |= (a << 16);
   // R14->R1: 14-bit reference counter 
   a = rDivider;
@@ -116,10 +113,10 @@ void initializeADF4001() {
   latch |= a;
   writeADF4001(latch);
   
-  // 2. Do an N load
+  // 3. Do an N load
   latch = 0;
   // G1: CP Gain
-  a = 0x0;
+  a = 0x0; // [Charge pump using setting 1] 
   latch |= (a << 21);
   // N13->N1: 13-bit N counter
   a = nDivider;
@@ -147,24 +144,24 @@ void setup() {
 
   // Hello world check
   digitalWrite(PIN_LED13,1);  
-  delay(100);
+  delay(250);
   digitalWrite(PIN_LED13,0);  
-  delay(100);
+  delay(250);
   digitalWrite(PIN_LED13,1);  
-  delay(100);
+  delay(250);
   digitalWrite(PIN_LED13,0);  
-  delay(100);
+  delay(250);
   
-  Serial.begin(9600);
+  //Serial.begin(9600);
 
   // Si5351 initialization
   si5351.init(SI5351_CRYSTAL_LOAD_8PF,0,0);
   // Boost up drive strength
-  si5351.drive_strength(SI5351_CLK0,SI5351_DRIVE_2MA);
+  si5351.drive_strength(SI5351_CLK0,SI5351_DRIVE_8MA);
 
-  // W1TKZ RX
+  // W1TKZ Repeater RX
   vfo = 147030000;
-  nDivider = 16;
+  nDivider = 8;
   rDivider = 1;
 
   // Get the Si5351 frequency standard loaded
