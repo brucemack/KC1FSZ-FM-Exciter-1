@@ -4,6 +4,7 @@
 //
 #include <SPI.h>
 #include <Wire.h>
+#include <FrequencyTimer2.h>
 
 // The Etherkit library
 #include <si5351.h>
@@ -14,6 +15,7 @@
 #define PIN_ADF4001_MUXOUT 5
 #define PIN_LOCK_IND 6
 #define PIN_LED13 13 
+#define PIN_CTCSS_TONE 9
 
 // This is the mask that is used to isolate the MSB of a 24-bit word
 #define MASK23 (1 << 23)
@@ -63,34 +65,34 @@ void initializeADF4001() {
   // to 0.
   latch = 0;
   // PD1: Power Down 2
-  a = 0x0; [Normal operation]
+  a = 0x0; // [Normal operation]
   latch |= (a << 21);
   // CPI6/CPI5/CPI4: Current Setting 2
-  a = 0x3; [2.5mA using 4.7k reistor]
+  a = 0x3; // [2.5mA using 4.7k reistor]
   latch |= (a << 18);
   // CPI3/CPI2/CPI1: Current Setting 1
-  a = 0x3; [2.5mA using 4.7k reistor]
+  a = 0x3; // [2.5mA using 4.7k reistor]
   latch |= (a << 15);
   // TC4/TC3/TC2/TC1: Timer Counter Control
-  a = 0x0; [3 cycles]
+  a = 0x0; // [3 cycles]
   latch |= (a << 11);
   // F5/F4: Fast Lock Mode and Fast Lock Mode Enable
-  a = 0x0; [Disabled]
+  a = 0x0; // [Disabled]
   latch |= (a << 9);
   // F3: CP Three State
-  a = 0x0; [Normal]
+  a = 0x0; // [Normal]
   latch |= (a << 8);
   // F2: Phase detector polarity
-  a = 0x1; [Positive]
+  a = 0x1; // [Positive]
   latch |= (a << 7);
   // M3/M2/M1: MUXOUT Control
-  a = 0x1; [Digital lock detect]
+  a = 0x1; // [Digital lock detect]
   latch |= (a << 4);
   // PD1: Power Down 1
-  a = 0x0; [Normal]
+  a = 0x0; // [Normal]
   latch |= (a << 3);
   // F1: Counter Reset
-  a = 0x0; [Normal]
+  a = 0x0; // [Normal]
   latch |= (a << 2);
   // C2/C1: Control Bits
   a = 0x3;
@@ -100,10 +102,10 @@ void initializeADF4001() {
   // 2. Do an R load
   latch = 0;
   // LDP: Lock Detect Precision
-  a = 0x1; [5 consecutive cycles needed]
+  a = 0x1; // [5 consecutive cycles needed]
   latch |= (a << 20);
   // ABP2/ABP1: Anti-Backlash Width
-  a = 0x0; [2.9ns]
+  a = 0x0; // [2.9ns]
   latch |= (a << 16);
   // R14->R1: 14-bit reference counter 
   a = rDivider;
@@ -127,6 +129,13 @@ void initializeADF4001() {
   writeADF4001(latch);  
 }
 
+boolean tickState = false;
+
+void ctcssTick() {
+  digitalWrite(PIN_CTCSS_TONE,(tickState) ? 1 : 0);
+  tickState = !tickState;
+}
+
 void setup() {
 
   pinMode(PIN_LED13,OUTPUT);
@@ -135,12 +144,14 @@ void setup() {
   pinMode(PIN_ADF4001_DATA,OUTPUT);
   pinMode(PIN_ADF4001_LE,OUTPUT);
   pinMode(PIN_ADF4001_MUXOUT,INPUT);
+  pinMode(PIN_CTCSS_TONE,OUTPUT);
 
   digitalWrite(PIN_LED13,0);
   digitalWrite(PIN_LOCK_IND,0);
   digitalWrite(PIN_ADF4001_CLK,0);
   digitalWrite(PIN_ADF4001_DATA,0);
   digitalWrite(PIN_ADF4001_LE,0);
+  digitalWrite(PIN_CTCSS_TONE,0);
 
   // Hello world check
   digitalWrite(PIN_LED13,1);  
@@ -163,6 +174,7 @@ void setup() {
   vfo = 147030000;
   nDivider = 8;
   rDivider = 1;
+  unsigned long plToneX10 = 1230;
 
   // Get the Si5351 frequency standard loaded
   unsigned long f = vfo / (unsigned long)nDivider;
@@ -170,6 +182,12 @@ void setup() {
 
   // Get the ADF4001 PLL setup 
   initializeADF4001();
+
+  // Start the PL tone generator
+  unsigned long periodUs = (10UL * 1000000UL) / plToneX10;
+  FrequencyTimer2::setPeriod(periodUs / 2UL);
+  FrequencyTimer2::setOnOverflow(ctcssTick);      
+  FrequencyTimer2::enable();
 }
 
 void loop() {
