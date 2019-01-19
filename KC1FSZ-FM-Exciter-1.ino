@@ -4,7 +4,6 @@
 //
 #include <SPI.h>
 #include <Wire.h>
-#include <FrequencyTimer2.h>
 
 // The Etherkit library
 #include <si5351.h>
@@ -18,7 +17,7 @@
 #define PIN_CTCSS_TONE 9
 
 // This is the mask that is used to isolate the MSB of a 24-bit word
-#define MASK23 (1 << 23)
+#define MASK23 (1L << 23)
 
 Si5351 si5351;
 
@@ -33,38 +32,38 @@ void clkStrobeADF4001() {
   digitalWrite(PIN_ADF4001_CLK,0);
 }
 
-void latchStrobeADF4001() {
-  digitalWrite(PIN_ADF4001_LE,1);
-  digitalWrite(PIN_ADF4001_LE,0);
-}
-
 void writeBitADF4001(bool bit) {
-    digitalWrite(PIN_ADF4001_DATA,(bit) ? 1 : 0);
+    int a = (bit) ? 1 : 0;
+    digitalWrite(PIN_ADF4001_DATA,a);
     clkStrobeADF4001();
 }
 
 // This function writes a complete 24-bit word into the ADF4001, MSB first!
 void writeADF4001(unsigned long w) {
+  // Latch enable low.  This is usedful for triggering logic analyzers
+  digitalWrite(PIN_ADF4001_LE,0);  
   // Clock the data bits into the shift register
   for (unsigned int i = 0; i < 24; i++) {
-    writeBitADF4001(w && MASK23 != 0);
+    // VERY IMPORTANT: THIS NEEDS TO BE BIT-WISE AND!
+    writeBitADF4001((w & MASK23) != 0);
     // Rotate to the left one to expose the next least significant bit
     w = w << 1;
   }
-  // Load the register
-  latchStrobeADF4001();
+  // Device latch are loaded on this leading edge
+  digitalWrite(PIN_ADF4001_LE,1);  
+  delayMicroseconds(1);
 }
 
-void initializeADF4001() {
+void initializeADF4001(char muxout) {
   
   // We are using the "Initialization Latch Method" of programming (see page 13)
   unsigned long latch = 0;
   unsigned long a = 0;
 
-  // 1. Program the initialiation latch (11).  Make sure the F1 bit is programmed
+  // 1. Program the initialiation latch (0b11).  Make sure the F1 bit is programmed
   // to 0.
   latch = 0;
-  // PD1: Power Down 2
+  // PD2: Power Down 2
   a = 0x0; // [Normal operation]
   latch |= (a << 21);
   // CPI6/CPI5/CPI4: Current Setting 2
@@ -83,10 +82,14 @@ void initializeADF4001() {
   a = 0x0; // [Normal]
   latch |= (a << 8);
   // F2: Phase detector polarity
-  a = 0x1; // [Positive]
+  a = 0x0; // [Negative]
+  //a = 0x1; // [Positive]
   latch |= (a << 7);
   // M3/M2/M1: MUXOUT Control
-  a = 0x1; // [Digital lock detect]
+  //a = 0x1; // [Digital lock detect]
+  //a = 0x3; // [VDD]
+  //a = 0x7; // [GND]
+  a = (muxout & 0x07);
   latch |= (a << 4);
   // PD1: Power Down 1
   a = 0x0; // [Normal]
@@ -104,6 +107,9 @@ void initializeADF4001() {
   // LDP: Lock Detect Precision
   a = 0x1; // [5 consecutive cycles needed]
   latch |= (a << 20);
+  // T2/T1: Test Bits
+  a = 0x0;
+  latch |= (a << 18);
   // ABP2/ABP1: Anti-Backlash Width
   a = 0x0; // [2.9ns]
   latch |= (a << 16);
@@ -129,12 +135,19 @@ void initializeADF4001() {
   writeADF4001(latch);  
 }
 
-boolean tickState = false;
-
-void ctcssTick() {
-  digitalWrite(PIN_CTCSS_TONE,(tickState) ? 1 : 0);
-  tickState = !tickState;
+void flash() {
+  digitalWrite(PIN_LED13,1);  
+  delay(250);
+  digitalWrite(PIN_LED13,0);  
+  delay(250);  
 }
+
+long lastStamp = millis();
+long interval = 1000;
+
+unsigned long toneLastStamp = micros();
+unsigned long toneInterval = 0;
+bool tonePhase = false;
 
 void setup() {
 
@@ -150,49 +163,90 @@ void setup() {
   digitalWrite(PIN_LOCK_IND,0);
   digitalWrite(PIN_ADF4001_CLK,0);
   digitalWrite(PIN_ADF4001_DATA,0);
-  digitalWrite(PIN_ADF4001_LE,0);
+  digitalWrite(PIN_ADF4001_LE,1);
   digitalWrite(PIN_CTCSS_TONE,0);
 
   // Hello world check
-  digitalWrite(PIN_LED13,1);  
-  delay(250);
-  digitalWrite(PIN_LED13,0);  
-  delay(250);
-  digitalWrite(PIN_LED13,1);  
-  delay(250);
-  digitalWrite(PIN_LED13,0);  
-  delay(250);
+  flash();
+  flash();
   
-  //Serial.begin(9600);
+  Serial.begin(9600);
+  Serial.println("KC1FSZ FM Exciter Controller");
 
   // Si5351 initialization
   si5351.init(SI5351_CRYSTAL_LOAD_8PF,0,0);
   // Boost up drive strength
   si5351.drive_strength(SI5351_CLK0,SI5351_DRIVE_8MA);
 
-  // W1TKZ Repeater RX
-  vfo = 147030000;
-  nDivider = 8;
-  rDivider = 1;
+  // W1TKZ Repeater + Offset
+  vfo = 147030000 + 600000;
+  // NOTE: THIS IS MESSED UP BECAUSE THE CLOCKS WERE SWAPPED ACCIDENTALLY!
+  nDivider = 1;
+  rDivider = 8;
   unsigned long plToneX10 = 1230;
-
+  unsigned long plTonePeriodUs = (10000000 / plToneX10);
+  toneInterval = plTonePeriodUs / 2;
+  
   // Get the Si5351 frequency standard loaded
-  unsigned long f = vfo / (unsigned long)nDivider;
+  unsigned long f = vfo / (unsigned long)rDivider;
   si5351.set_freq((unsigned long long)f * 100ULL,SI5351_CLK0);
 
-  // Get the ADF4001 PLL setup 
-  initializeADF4001();
+  si5351.update_status();
+  Serial.print("Si5351/a SYS_INIT: ");
+  Serial.print(si5351.dev_status.SYS_INIT);
+  Serial.print("  LOL_A: ");
+  Serial.print(si5351.dev_status.LOL_A);
+  Serial.print("  LOL_B: ");
+  Serial.print(si5351.dev_status.LOL_B);
+  Serial.print("  LOS: ");
+  Serial.print(si5351.dev_status.LOS);
+  Serial.print("  REVID: ");
+  Serial.println(si5351.dev_status.REVID);
 
-  // Start the PL tone generator
-  unsigned long periodUs = (10UL * 1000000UL) / plToneX10;
-  FrequencyTimer2::setPeriod(periodUs / 2UL);
-  FrequencyTimer2::setOnOverflow(ctcssTick);      
-  FrequencyTimer2::enable();
+  Serial.print("VFO: ");
+  Serial.println(f);
+
+  // ADF4001 self-test
+  delay(1000);
+  
+  // (MUXOUT=VDD)
+  initializeADF4001(0x3);
+  if (digitalRead(PIN_ADF4001_MUXOUT) != 1) {
+    Serial.println("ADF4001 Self-Test Error (1)");
+    flash();
+  }
+
+  // (MUXOUT=GND)
+  initializeADF4001(0x7);
+  if (digitalRead(PIN_ADF4001_MUXOUT) != 0) {
+    Serial.println("ADF4001 Self-Test Error (0)");
+    flash();
+  }
+
+  // ADF4001 iniitalization (MUXOUT=Digital Lock)
+  initializeADF4001(0x1);
+  // ADF4001 iniitalization (MUXOUT=N Counter Out)
+  //initializeADF4001(0x2);
 }
 
 void loop() {
+  
   // Check the PLL lock 
   int a = digitalRead(PIN_ADF4001_MUXOUT);
   // Display 
   digitalWrite(PIN_LOCK_IND,a);
+  digitalWrite(PIN_LED13,a);
+
+  // Periodic activity
+  if (millis() - lastStamp > interval) {  
+    lastStamp = millis();
+  }
+
+  // Tone
+  unsigned long s = micros();
+  if (s - toneLastStamp > toneInterval) {
+    toneLastStamp = s;
+    tonePhase = !tonePhase;
+    digitalWrite(PIN_CTCSS_TONE,(tonePhase) ? 1 : 0);
+  }
 }
